@@ -1,7 +1,6 @@
 # Name: Nahyun Kim
 # nahyun.kim.4@stonybrook.edu
 
-
 import re
 
 # define TOKENS
@@ -54,7 +53,7 @@ class Token:
         self.value = token_value
 
     def __str__(self):
-        return f"token: {self.type} : |{self.value}|"
+        return "token: {} : |{}|".format(self.type, self.value)
 
 # create buffer
 def initLexer(filename):
@@ -97,7 +96,7 @@ def getNextToken():
     current_index += 1
     return Token("UNKNOWN", source_code[current_index-1])
 
-# 테스트용 메인 함수
+# For test
 if __name__ == "__main__":
     filename = input("Enter the filename: ")
     if initLexer(filename)==0:
