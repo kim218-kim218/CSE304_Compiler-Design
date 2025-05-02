@@ -1,7 +1,7 @@
 # Name: Nahyun Kim
 # nahyun.kim.4@stonybrook.edu
 
-# Define TOKENS dict (정규식은 쓰지 않음, 이름만 매핑에 사용)
+# Define TOKENS dict 
 TOKENS = {
     'T_SEMICOLON': ';',
     'T_LPAREN': '(',
@@ -34,6 +34,7 @@ TOKENS = {
     'T_CALL': 'call',
     'T_PRINT': 'print',
     'T_READ': 'read',
+    'T_RETURN': 'return',
     'T_FUNCTION': 'function',
     'T_Ident': 'ID',         # 사용자 정의 식별자
     'T_ICONST': 'ICONST',    # 정수 상수
@@ -96,19 +97,30 @@ def getNextToken():
         return Token(token_type, text)
 
     # Number (int or float)
-    if ch.isdigit():
+    if ch.isdigit() or (ch == '.' and current_index + 1 < length and source_code[current_index + 1].isdigit()):
         start = current_index
-        while current_index < length and source_code[current_index].isdigit():
-            current_index += 1
-        if current_index < length and source_code[current_index] == '.':
-            current_index += 1
-            if current_index < length and source_code[current_index].isdigit():
+
+        # Case 1: Starts with digit (e.g., 5, 5., 5.0)
+        if ch.isdigit():
+            while current_index < length and source_code[current_index].isdigit():
+                current_index += 1
+
+            # Optional decimal part
+            if current_index < length and source_code[current_index] == '.':
+                current_index += 1
                 while current_index < length and source_code[current_index].isdigit():
                     current_index += 1
                 return Token("T_FCONST", source_code[start:current_index])
-            else:
-                return Token("UNKNOWN", source_code[start:current_index])
-        return Token("T_ICONST", source_code[start:current_index])
+
+            return Token("T_ICONST", source_code[start:current_index])
+
+        # Case 2: Starts with dot (e.g., .5)
+        elif ch == '.' and current_index + 1 < length and source_code[current_index + 1].isdigit():
+            current_index += 1  # skip '.'
+            while current_index < length and source_code[current_index].isdigit():
+                current_index += 1
+            return Token("T_FCONST", source_code[start:current_index])
+
 
     # Multi-character operators
     two_char = source_code[current_index:current_index+2]
@@ -127,7 +139,7 @@ def getNextToken():
 
 # For test
 if __name__ == "__main__":
-    filename = input("Enter the filename: ")
+    filename = "parser_tests/basic_rascl/"+input("Enter the filename: ")
     if initLexer(filename) == 0:
         print("File not found.")
     else:

@@ -1,0 +1,33 @@
+Parsing program: 
+Program => decllist funcdecls DD
+decllist => decl decllist
+decl => typespec variablelist
+variablelist => variable variablelisttail
+variable => ID variabletail
+variabletail => LBRACKET ICONST RBRACKET variabletail
+variablelisttail => COMMA variable variablelisttail
+variable => ID variabletail
+variabletail => eps
+variablelisttail => SEMICOLON
+decllist => decl decllist
+decl => typespec variablelist
+variablelist => variable variablelisttail
+variable => ID variabletail
+variabletail => eps
+variablelisttail => COMMA variable variablelisttail
+variable => ID variabletail
+variabletail => LBRACKET ICONST RBRACKET variabletail
+variablelisttail => SEMICOLON
+decllist => eps
+funcdecls => maindecl
+maindecl => main() bstatementlist
+decllist => eps
+statement => assignmentstatement
+usevariable => ID usevariabletail
+usevariabletail => arraydim
+arraydim => LBRACKET arraydimtail
+arraydimtail => Iconst RBracket arraydim
+Parse error (T_Assign) : Expected ']' at 9, 5
+arraydim => eps
+Parse error (T_Assign) : Assignment statement parse failed. at 9, 5
+statementlist => eps

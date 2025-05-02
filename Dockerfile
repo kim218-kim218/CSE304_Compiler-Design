@@ -1,8 +1,15 @@
 FROM python:3.9-slim
 
-WORKDIR /src
+# Create working directory
+WORKDIR /app
 
-COPY . /src
+# Create input/output folders
+RUN mkdir -p /app/tests /app/output
 
+# Copy source code
+COPY src/ /app/src/
 
-CMD [ "python", "Phase_II_Tests/test_ST.py"  ]
+# Set working directory
+WORKDIR /app/src
+
+CMD [ "python", "parser.py"  ]
