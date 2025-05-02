@@ -554,4 +554,4 @@ if __name__ == "__main__":
     program()
 
     logfile.close()
-    print(f"V Parsing completed. Log saved to {rsp_filename}")
+    print(f"V Parsing completed.")
