@@ -1,6 +1,8 @@
 # Nahyun Kim
 # nahyun.kim.4@stonybrook.edu
 
+import sys
+
 class SymbolInfo:
     def __init__(self, identifier):
         self.identifier = identifier
@@ -29,27 +31,24 @@ class SymbolTable:
         self.lastScope = 0
 
     def enterScope(self):
-        # monotonically increasing sequence of integers
         self.lastScope += 1
         self.scopes.append(dict())
         self.scopeStack.append(self.lastScope)
         return self.lastScope
 
     def exitScope(self):
-        print("Before exit -> lastScope=",self.lastScope ,"scopeStack=", self.scopeStack)
-        if len(self.scopeStack)==0:
+        print("Before exit -> lastScope=", self.lastScope, "scopeStack=", self.scopeStack)
+        if len(self.scopeStack) == 0:
             print("Already at global scope.")
         else:
-            while len(self.scopeStack) >1:
+            while len(self.scopeStack) > 1:
                 self.scopeStack.pop()
-        
-        print("After exit -> lastScope=",self.lastScope ,"scopeStack=", self.scopeStack)
-
+        print("After exit -> lastScope=", self.lastScope, "scopeStack=", self.scopeStack)
 
     def addSymbol(self, identifier):
         currentScopeIndex = self.scopeStack[-1]
         table = self.scopes[currentScopeIndex]
-        if identifier in table: #already in table -> not needed to add
+        if identifier in table:
             return False
         table[identifier] = SymbolInfo(identifier)
         return True
@@ -58,30 +57,24 @@ class SymbolTable:
         if scope >= len(self.scopes):
             return False
         table = self.scopes[scope]
-
-        # if there is no id in this scope, cannot add attribute.
         if identifier not in table:
             return False
-        
         table[identifier].add_attribute(attr, value)
         return True
 
     def symbolInTable(self, identifier, scope):
-        # Invalid scope (if negative): Find symbols in all scopes
         if scope < 0:
             for scope_dict in self.scopes:
                 if identifier in scope_dict:
                     return True
             return False
-
-        # find the symbol only in that scope
         elif scope < len(self.scopes):
             return identifier in self.scopes[scope]
         else:
             return False
 
     def getSymbol(self, identifier, scope):
-        if scope > len(self.scopes)-1:
+        if scope > len(self.scopes) - 1:
             return None
         else:
             return self.scopes[scope].get(identifier, None)
@@ -93,3 +86,19 @@ class SymbolTable:
                 return symbol
         return None
 
+# === Phase 4 helper functions ===
+symbol_table_instance = SymbolTable()
+
+def insert_symbol(name, type_):
+    added = symbol_table_instance.addSymbol(name)
+    if added:
+        scope = symbol_table_instance.scopeStack[-1]
+        symbol_table_instance.addAttributeToSymbol(name, scope, 'type', type_)
+    return added
+
+def lookup_symbol_table(name):
+    symbol = symbol_table_instance.lookup(name)
+    if symbol is None:
+        print(f"** Symnbol Table Error: Undeclared variable '{name}'")
+        sys.exit(1)  
+    return symbol.get_attribute('type')

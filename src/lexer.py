@@ -139,7 +139,7 @@ def getNextToken():
 
 # For test
 if __name__ == "__main__":
-    filename = "parser_tests/basic_rascl/"+input("Enter the filename: ")
+    filename = "../Phase_V_Tests/basic_rascl/"+input("Enter the filename: ")
     if initLexer(filename) == 0:
         print("File not found.")
     else:

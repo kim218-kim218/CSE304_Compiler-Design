@@ -2,14 +2,79 @@
 # nahyun.kim.4@stonybrook.edu
 
 from lexer import initLexer, getNextToken
+from symbol_table import lookup_symbol_table, insert_symbol
 import sys
 import os
 
+# ---------------- Helper Function ----------------------------------------
 current_token = None
+
+temp_counter = 0
+rif_output = []
+data_segment = []
+
+def new_temp():
+    global temp_counter
+    name = f"T{temp_counter}"
+    temp_counter += 1
+    return name
+
+float_temp_count = 0
+
+def new_float_temp():
+    global float_temp_count
+    name = f"FT{float_temp_count}"
+    float_temp_count += 1
+    return name
+
+
+def emit(op, arg1, arg2, result):
+    rif_output.append(f"{op}, {arg1}, {arg2}, {result}")
+
+
+def emit_data(dtype, count, name):
+    data_segment.append(f"{dtype}, 0, {count}, {name}")
+
+def emit_comment(comment):
+    rif_output.append(f"# {comment}")
+
+def condexpr_helper(result_temp, true_label, false_label):
+    # OR 처리
+    if lookahead() == "T_LPAREN":
+        match("T_LPAREN")
+        left, right, op = condexpr()
+        match("T_RPAREN")
+    elif lookahead() in ["T_Ident", "T_ICONST", "T_FCONST", "T_LPAREN", "T_MINUS"]:
+        left = otherexpression()
+        if lookahead() in ["T_LT", "T_LE", "T_GT", "T_GE", "T_EQ"]:
+            op = lookahead()
+            match(op)
+            right = otherexpression()
+            rif_op = {
+                "T_LT": "blt", "T_LE": "ble", "T_GT": "bgt", "T_GE": "bge", "T_EQ": "beq"
+            }[op]
+            emit(rif_op, left, right, true_label)
+        else:
+            emit("bne", left, "0", true_label)
+
+    if lookahead() == "T_OR":
+        match("T_OR")
+        emit("j", "0", "0", false_label)  # short-circuit 실패 시 false로
+        emit(".label", "0", "0", false_label)
+        condexpr_helper(result_temp, true_label, false_label)
+    elif lookahead() == "T_AND":
+        mid_label = new_label()
+        emit("j", "0", "0", mid_label)  # if true, continue evaluating
+        emit(".label", "0", "0", mid_label)
+        match("T_AND")
+        condexpr_helper(result_temp, true_label, false_label)
+    else:
+        emit("j", "0", "0", false_label)
 
 def match(expected_type):
     global current_token
     if current_token.type == expected_type:
+        # print("-------------Token :",current_token)
         current_token = getNextToken()
     else:
         print(f" ** Error: Expected {expected_type} but got {current_token.type}")
@@ -18,6 +83,8 @@ def match(expected_type):
 def lookahead():
     return current_token.type
 
+# --------------------------------------------------------------------------
+
 def program():
     production("Program => decllist funcdecls T_EOF")
     decllist()
@@ -25,6 +92,17 @@ def program():
     if lookahead() != "T_EOF":
         print(f" ** Error in program: Expected T_EOF but got {lookahead()}")
         sys.exit(1)
+
+    output_path = os.path.join(output_dir, fname.rsplit(".", 1)[0] + ".rso")
+
+    with open(output_path, "w") as f:
+        f.write(".segment, 0, 0, .data\n")
+        for line in data_segment:
+            f.write(line + "\n")
+
+        f.write(".segment, 0, 0, .text\n")
+        for line in rif_output:
+            f.write(line + "\n")
 
 def funcdecls():
     if lookahead() == "T_FUNCTION":
@@ -90,10 +168,20 @@ def fparm():
     typespec()
     parmVar()
 
+# def parmVar():
+#     production("parmVar => ID parmVarTail")
+#     match("T_Ident")
+#     parmVarTail()
 def parmVar():
     production("parmVar => ID parmVarTail")
+    name = current_token.value
     match("T_Ident")
+
+    # 🔸 심볼 테이블에 매개변수 추가
+    insert_symbol(name, last_declared_type)
+
     parmVarTail()
+
 
 def parmVarTail():
     if lookahead() == "T_LBRACKET":
@@ -143,50 +231,119 @@ def statementlisttail():
     else:
         production("statementlisttail => e")
 
+
 def decl():
     production("decl => typespec variablelist")
+    
+    # 저장할 타입 예: .int, .float
+    if lookahead() == "T_INT":
+        dtype = ".int"
+    elif lookahead() == "T_FLOAT":
+        dtype = ".float"
+    else:
+        print(f"** Error in decl(): unknown type {lookahead()}")
+        sys.exit(1)
+
     typespec()
-    variablelist()
+    variablelist(dtype)
 
-def variablelist():
+
+def variablelist(dtype):
     production("variablelist => variable variablelisttail")
-    variable()
-    variablelisttail()
+    variable(dtype)
+    variablelisttail(dtype)
 
-def variablelisttail():
+
+def variablelisttail(dtype):
     if lookahead() == "T_COMMA":
-        production("variablelisttail => COMMA variable variablelisttail")
         match("T_COMMA")
-        variable()
-        variablelisttail()
+        variable(dtype)
+        variablelisttail(dtype)
     elif lookahead() == "T_SEMICOLON":
-        production("variablelisttail => SEMICOLON")
         match("T_SEMICOLON")
     else:
         print(f"** Error in variablelisttail: got {lookahead()}")
         sys.exit(1)
 
-def variable():
+# def variable(dtype):
+#     production("variable => ID variabletail")
+#     name = current_token.value
+#     match("T_Ident")
+    
+#     # 👇 타입 문자열 구분
+#     type_str = "int" if dtype == ".int" else "float"
+    
+#     # 👇 Symbol Table에 삽입
+#     insert_symbol(name, type_str)
+    
+#     # 👇 데이터 세그먼트로 출력
+#     if lookahead() == "T_LBRACKET":
+#         match("T_LBRACKET")
+#         size = int(current_token.value)
+#         match("T_ICONST")
+#         match("T_RBRACKET")
+#         emit_data(dtype, size, name)
+#     else:
+#         emit_data(dtype, 1, name)
+def variable(dtype):
     production("variable => ID variabletail")
+    name = current_token.value
     match("T_Ident")
-    variabletail()
 
+    # 타입 문자열
+    type_str = "int" if dtype == ".int" else "float"
+    insert_symbol(name, type_str)
+
+    # 배열 크기 계산
+    total_size = variabletail()
+
+    emit_data(dtype, total_size, name)
+
+# def variabletail():
+#     if lookahead() == "T_LBRACKET":
+#         production("variabletail => LBRACKET ICONST RBRACKET variabletail")
+#         match("T_LBRACKET")
+#         match("T_ICONST")
+#         match("T_RBRACKET")
+#         variabletail()
+#     else:
+#         production("variabletail => e")
 def variabletail():
     if lookahead() == "T_LBRACKET":
         production("variabletail => LBRACKET ICONST RBRACKET variabletail")
         match("T_LBRACKET")
+        size = int(current_token.value)
         match("T_ICONST")
         match("T_RBRACKET")
-        variabletail()
+        rest_size = variabletail()
+        return size * rest_size
     else:
         production("variabletail => e")
+        return 1  # 스칼라 변수
+
+
+# def typespec():
+#     if lookahead() == "T_INT":
+#         production("typespec => INT")
+#         match("T_INT")
+#     elif lookahead() == "T_FLOAT":
+#         production("typespec => FLOAT")
+#         match("T_FLOAT")
+#     else:
+#         print(f"** Error in typespec: got {lookahead()}")
+#         sys.exit(1)
+
+last_declared_type = None  # 🔸 전역 선언 (parser.py 맨 위에서)
 
 def typespec():
+    global last_declared_type
     if lookahead() == "T_INT":
         production("typespec => INT")
+        last_declared_type = "int"
         match("T_INT")
     elif lookahead() == "T_FLOAT":
         production("typespec => FLOAT")
+        last_declared_type = "float"
         match("T_FLOAT")
     else:
         print(f"** Error in typespec: got {lookahead()}")
@@ -194,66 +351,101 @@ def typespec():
 
 def usevariable():
     production("usevariable => ID usevariabletail")
+    varname = current_token.value
     match("T_Ident")
-    usevariabletail()
+    addr_temp = usevariabletail(varname)
+    return addr_temp
 
-def usevariabletail():
+def usevariabletail(varname):
     if lookahead() == "T_LBRACKET":
         production("usevariabletail => arraydim")
-        arraydim()
+        return arraydim(varname)
     else:
         production("usevariabletail => e")
+        addr_temp = new_temp()
+        emit("la", addr_temp, 0, varname)
+        return addr_temp
 
-def arraydim():
+def arraydim(varname):
+    match("T_LBRACKET")
+    index_temp = otherexpression()  # ← 중요: expression으로 바꿔서 인덱스가 식일 수 있도록 함
+    match("T_RBRACKET")
+
+    # 주소 계산: base + (index * 4)
+    offset_temp = new_temp()
+    addr_temp = new_temp()
+    base_temp = new_temp()
+
+    emit("li", offset_temp, 0, "4")
+    emit("mul", index_temp, offset_temp, offset_temp)
+    emit("la", base_temp, 0, varname)
+    emit("add", offset_temp, base_temp, addr_temp)
+
+    # 다차원 배열일 경우 재귀 호출
     if lookahead() == "T_LBRACKET":
-        production("arraydim => LBRACKET arraydimtail")
-        match("T_LBRACKET")
-        arraydimtail()
+        return arraydimtail(addr_temp)
     else:
-        production("arraydim => e")
+        return addr_temp
 
+def arraydimtail(prev_addr_temp):
+    match("T_LBRACKET")
+    index_temp = otherexpression()
+    match("T_RBRACKET")
 
-def arraydimtail():
-    if lookahead() == "T_ICONST":
-        production("arraydimtail => ICONST RBRACKET arraydim")
-        match("T_ICONST")
-        match("T_RBRACKET")
-        arraydim()
-    elif lookahead() == "T_Ident":
-        production("arraydimtail => ID RBRACKET arraydim")
-        match("T_Ident")
-        match("T_RBRACKET")
-        arraydim()
+    offset_temp = new_temp()
+    new_addr_temp = new_temp()
+
+    emit("li", offset_temp, 0, "4")
+    emit("mul", index_temp, offset_temp, offset_temp)
+    emit("add", prev_addr_temp, offset_temp, new_addr_temp)
+
+    if lookahead() == "T_LBRACKET":
+        return arraydimtail(new_addr_temp)
     else:
-        print(f"** Error in arraydimtail: got {lookahead()}")
-        sys.exit(1)
+        return new_addr_temp
 
 def statement():
     token = lookahead()
+
     if token == "T_WHILE":
         production("statement => whilestatement")
+        emit_comment("Start WHILE statement ---")
         whilestatement()
+
     elif token == "T_IF":
         production("statement => ifstatement")
+        emit_comment("Start IF statement ---")
         ifstatement()
+
     elif token == "T_Ident":
         production("statement => assignmentstatement")
+        emit_comment("Start ASSIGN statement ---")
         assignmentstatement()
+
     elif token == "T_PRINT":
         production("statement => printstatement")
+        emit_comment("Start PRINT statement ---")
         printstatement()
+
     elif token == "T_READ":
         production("statement => readstatement")
+        emit_comment("Start READ statement ---")
         readstatement()
+
     elif token == "T_RETURN":
         production("statement => returnstatement")
+        emit_comment("Start RETURN statement ---")
         returnstatement()
+
     elif token == "T_CALL":
         production("statement => callstatement")
+        emit_comment("Start CALL statement ---")
         callstatement()
+
     else:
         print(f"** Error in statement: got {lookahead()}")
         sys.exit(1)
+
 
 def basicexpr():
     production("basicexpr => basicterm basicexprtail")
@@ -304,47 +496,61 @@ def basicfactor():
 
 def assignmentstatement():
     production("assignmentstatement => usevariable ASSIGN otherexpression")
-    usevariable()
+   
+    # 좌변 주소 계산
+    addr_temp = usevariable()  # usevariable()은 이제 주소를 리턴해야 함
     match("T_ASSIGN")
-    otherexpression()
+
+    # 우변 값 계산
+    value_temp = otherexpression()  # expression도 값을 계산해서 T# 리턴하게 해야 함
+
+    # RIF 저장 코드 생성
+    emit("sw", value_temp, 0, addr_temp)
+
 
 def otherexpression():
     production("otherexpression => term otherexpressiontail")
-    term()
-    otherexpressiontail()
+    t1 = term()
+    return otherexpressiontail(t1)
 
-def otherexpressiontail():
+def otherexpressiontail(inherited_temp):
     if lookahead() == "T_PLUS":
-        production("otherexpressiontail => PLUS term otherexpressiontail")
         match("T_PLUS")
-        term()
-        otherexpressiontail()
+        t2 = term()
+        result = new_temp()
+        emit("add", inherited_temp, t2, result)
+        return otherexpressiontail(result)
     elif lookahead() == "T_MINUS":
-        production("otherexpressiontail => MINUS term otherexpressiontail")
         match("T_MINUS")
-        term()
-        otherexpressiontail()
+        t2 = term()
+        result = new_temp()
+        emit("sub", inherited_temp, t2, result)
+        return otherexpressiontail(result)
     else:
         production("otherexpressiontail => e")
+        return inherited_temp
 
 def term():
     production("term => factor termtail")
-    factor()
-    termtail()
+    f1 = factor()
+    return termtail(f1)
 
-def termtail():
+def termtail(inherited_temp):
     if lookahead() == "T_MULT":
-        production("termtail => MULT factor termtail")
         match("T_MULT")
-        factor()
-        termtail()
+        f2 = factor()
+        result = new_temp()
+        emit("mul", inherited_temp, f2, result)
+        return termtail(result)
     elif lookahead() == "T_DIV":
-        production("termtail => DIV factor termtail")
         match("T_DIV")
-        factor()
-        termtail()
+        f2 = factor()
+        result = new_temp()
+        emit("div", inherited_temp, f2, result)
+        return termtail(result)
     else:
-        production("termtail => e")
+        return inherited_temp
+
 
 def factortail():
     if lookahead() == "T_LBRACKET":
@@ -382,39 +588,163 @@ def arglistrem():
 def factor():
     if lookahead() == "T_Ident":
         production("factor => ID factortail")
+        varname = current_token.value
         match("T_Ident")
-        factortail()
+
+        # lookahead()를 통해 factortail을 구분
+        if lookahead() == "T_LBRACKET":
+            # a[expr]
+            match("T_LBRACKET")
+            index_temp = otherexpression() 
+            match("T_RBRACKET")
+
+            offset_temp = new_temp()
+            emit("li", offset_temp, 0, "4")
+
+            offset_bytes = new_temp()
+            emit("mul", index_temp, offset_temp, offset_bytes)
+
+            base_temp = new_temp()
+            emit("la", base_temp, 0, varname)
+
+            final_addr = new_temp()
+            emit("add", offset_bytes, base_temp, final_addr)
+
+            result_temp = new_temp()
+            emit("lw", result_temp, 0, final_addr)
+            return result_temp
+
+        elif lookahead() == "T_LPAREN":
+            # 함수 호출: foo(expr)
+            match("T_LPAREN")
+            arglist()  # 내부에서 param emit 필요
+            match("T_RPAREN")
+
+            ret_temp = new_temp()
+            emit("call", 0, ret_temp, varname)
+            return ret_temp
+
+        else:
+            addr_temp = new_temp()
+            emit("la", addr_temp, 0, varname)
+
+            var_type = lookup_symbol_table(varname)
+
+            if var_type == "float":
+                val_temp = new_float_temp()
+            else:
+                val_temp = new_temp()
+
+            emit("lw", val_temp, 0, addr_temp)
+            return val_temp
+
     elif lookahead() == "T_ICONST":
         production("factor => ICONST")
+        val = current_token.value
         match("T_ICONST")
+        temp = new_temp()
+        emit("li", temp, 0, val)
+        return temp
+
     elif lookahead() == "T_FCONST":
         production("factor => FCONST")
+        val = current_token.value
         match("T_FCONST")
+        temp = new_float_temp()
+        emit("li", temp, 0, val)  # FT#
+        return temp
+
     elif lookahead() == "T_LPAREN":
         production("factor => LPAREN otherexpression RPAREN")
         match("T_LPAREN")
-        otherexpression()
+        result = otherexpression()
         match("T_RPAREN")
+        return result
+
     elif lookahead() == "T_MINUS":
         production("factor => MINUS factor")
         match("T_MINUS")
-        factor()
+        val_temp = factor()  # 재귀 호출
+        result_temp = new_temp()
+        emit("sub", "0", val_temp, result_temp)  # 0 - val
+        return result_temp
+
     else:
         print(f"** Error in factor: got {lookahead()}")
         sys.exit(1)
 
+
+# ----------- Helper Func -----------
+label_count = 0
+
+def new_label():
+    global label_count
+    name = f"L{label_count}"
+    label_count += 1
+    return name
+# -----------------------------------
+
+
 def whilestatement():
     production("whilestatement => WHILE relationalexpr bstatementlist")
     match("T_WHILE")
-    relationalexpr()
-    bstatementlist()
+    label_body = new_label()
+    label_cond = new_label()
+    label_end = new_label()
+
+    emit(".label", "0", "0", label_cond)
+
+    match("T_LPAREN")
+    left, right, op = condexpr()
+    match("T_RPAREN")
+
+    if right:  # 비교 연산
+        # print("op in while statement ------------>",op)
+        rif_op = {
+            "T_LT": "blt", "T_LE": "ble",
+            "T_GT": "bgt", "T_GE": "bge",
+            "T_EQ": "beq"
+        }[op]
+        emit(rif_op, left, right, label_body)
+    else:
+        # 단순 조건값이 0이 아닌 경우 (e.g., while(x))
+        emit("bne", left, "0", label_body)
+
+    emit("j", "0", "0", label_end)
+
+    emit(".label", "0", "0", label_body)
+    match("T_LBRACE")
+    statementlist()
+    match("T_RBRACE")
+    emit("j", "0", "0", label_cond)
+    emit(".label", "0", "0", label_end)
+
 
 def ifstatement():
-    production("ifstatement => IF relationalexpr bstatementlist istail")
+    production("ifstatement => IF condexpr bstatementlist istail")
     match("T_IF")
-    relationalexpr()
-    bstatementlist()
+
+    label_then = new_label()
+    label_else = new_label()
+    label_end = new_label()
+
+    match("T_LPAREN")
+
+    condexpr_helper("dummy", label_then, label_else)
+
+    match("T_RPAREN")
+
+    emit(".label", "0", "0", label_then)
+    match("T_LBRACE")
+    statementlist()
+    match("T_RBRACE")
+    emit("j", "0", "0", label_end)
+
+    emit(".label", "0", "0", label_else)
     istail()
+
+    emit(".label", "0", "0", label_end)
+
 
 def istail():
     if lookahead() == "T_ELSE":
@@ -423,6 +753,7 @@ def istail():
         bstatementlist()
     else:
         production("istail => e")
+
 
 def relationalexpr():
     production("relationalexpr => condexpr relationalexprtail")
@@ -442,53 +773,34 @@ def relationalexprtail():
         production("relationalexprtail => e")
 
 def condexpr():
-    if lookahead() == "T_LPAREN":
-        production("condexpr => LPAREN otherexpression condexprtail RPAREN")
-        match("T_LPAREN")
-        otherexpression()
-        condexprtail()
-        match("T_RPAREN")
-    elif lookahead() == "T_NOT":
-        production("condexpr => NOT condexpr")
-        match("T_NOT")
-        condexpr()
-    elif lookahead() in ["T_Ident", "T_ICONST", "T_FCONST", "T_LPAREN", "T_MINUS"]:
-        production("condexpr => otherexpression condexprtail")
-        otherexpression()
-        condexprtail()
-    else:
-        print(f"** Error in condexpr: got {lookahead()}")
-        sys.exit(1)
+    left_label = new_label()
+    end_label = new_label()
+    result_temp = new_temp()
 
-def condexprtail():
-    if lookahead() == "T_LT":
-        production("condexprtail => LT otherexpression")
-        match("T_LT")
-        otherexpression()
-    elif lookahead() == "T_LE":
-        production("condexprtail => LE otherexpression")
-        match("T_LE")
-        otherexpression()
-    elif lookahead() == "T_GT":
-        production("condexprtail => GT otherexpression")
-        match("T_GT")
-        otherexpression()
-    elif lookahead() == "T_GE":
-        production("condexprtail => GE otherexpression")
-        match("T_GE")
-        otherexpression()
-    elif lookahead() == "T_EQ":
-        production("condexprtail => EQUAL otherexpression")
-        match("T_EQ")
-        otherexpression()
+    condexpr_helper(result_temp, left_label, end_label)
+
+    emit(".label", "0", "0", end_label)
+    return (result_temp, None, None)
+
+
+def condexprtail(left):
+    if lookahead() in ["T_LT", "T_LE", "T_GT", "T_GE", "T_EQ"]:
+        op = lookahead()
+        match(op)
+        right = otherexpression()
+
+        # 비교 연산은 결과값을 사용하지 않고 직접 분기하기 때문에, left와 right만 리턴
+        return (left, right, op)
     else:
-        print(f"** Error in condexprtail: got {lookahead()}")
-        sys.exit(1)
+        # 그냥 값 자체를 조건으로 쓰는 경우
+        return (left, None, None)
 
 def printstatement():
     production("printstatement => PRINT otherexpression")
     match("T_PRINT")
-    otherexpression()
+    value_temp = otherexpression()
+    emit("syscall", "2", value_temp, "0")
+
 
 def readstatement():
     production("readstatement => READ usevariable")
@@ -499,9 +811,11 @@ def returnstatement():
     match("T_RETURN")
     if lookahead() in ["T_Ident", "T_ICONST", "T_FCONST", "T_LPAREN", "T_MINUS"]:
         production("returnstatement => RETURN otherexpression")
-        otherexpression()
+        temp = otherexpression()
+        emit("return", "0", "0", temp)
     else:
         production("returnstatement => RETURN")
+        emit("return", "0", "0", "0")
 
 def callstatement():
     production("callstatement => CALL ID funccalltail")
